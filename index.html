@@ -156,6 +156,17 @@
     color: var(--sage);
   }
 
+  .workload-note{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--mist);
+    margin: 6px 0 0;
+  }
+
+  .workload-note.fits{ color: var(--sage); }
+  .workload-note.tight{ color: var(--running); }
+  .workload-note.over{ color: var(--accent); font-weight: 700; }
+
   .tick-toggle{
     font-family: var(--font-mono);
     font-size: 11px;
@@ -551,6 +562,7 @@
       </div>
     </div>
     <p class="progress-note" id="progressNote">Loading today's list…</p>
+    <p class="workload-note" id="workloadNote"></p>
     <button class="tick-toggle" id="tickToggle" type="button">🔇 Ticking off</button>
   </header>
 
@@ -848,6 +860,7 @@
       completions[task.id] = true;
       saveCompletions();
       updateProgressNote();
+      updateWorkloadNote();
       if (fromTimer) chime();
     }
 
@@ -863,6 +876,7 @@
       delete completions[task.id];
       saveCompletions();
       updateProgressNote();
+      updateWorkloadNote();
     }
 
     let lastTickSecond = null;
@@ -916,6 +930,7 @@
       await saveCompletions();
       el.remove();
       updateProgressNote();
+      updateWorkloadNote();
     });
 
     const estEl = el.querySelector('.est');
@@ -961,7 +976,7 @@
       const next = el.nextElementSibling;
       if (next) { tasksEl.insertBefore(next, el); persistOrder(); }
     });
-    controllers.push({ sync });
+    controllers.push({ sync, getRemaining: () => isDone ? 0 : remaining });
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -993,6 +1008,49 @@
     const name = (config.milestone || DEFAULT_MILESTONE).trim() || DEFAULT_MILESTONE;
     milestoneName.textContent = name;
     milestoneName2.textContent = name;
+    lastMilestoneDiffMs = diffMs;
+  }
+
+  let lastMilestoneDiffMs = null;
+  const workloadNote = document.getElementById('workloadNote');
+
+  function formatDuration(totalSeconds){
+    const mins = Math.round(totalSeconds / 60);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h === 0) return m + 'm';
+    return h + 'h ' + m + 'm';
+  }
+
+  function updateWorkloadNote(){
+    if (!controllers.length){ workloadNote.textContent = ''; return; }
+    const workSeconds = controllers.reduce((sum, c) => sum + c.getRemaining(), 0);
+    if (workSeconds <= 0){
+      workloadNote.textContent = 'All tasks done.';
+      workloadNote.className = 'workload-note fits';
+      return;
+    }
+    const workLabel = formatDuration(workSeconds);
+    if (lastMilestoneDiffMs === null){
+      workloadNote.textContent = workLabel + ' of tasks left';
+      workloadNote.className = 'workload-note';
+      return;
+    }
+    const availSeconds = lastMilestoneDiffMs / 1000;
+    const diffSeconds = availSeconds - workSeconds;
+    if (availSeconds <= 0){
+      workloadNote.textContent = workLabel + ' of tasks left — milestone has passed';
+      workloadNote.className = 'workload-note over';
+    } else if (diffSeconds < 0){
+      workloadNote.textContent = workLabel + ' of tasks, only ' + formatDuration(availSeconds) + ' left — over by ' + formatDuration(-diffSeconds);
+      workloadNote.className = 'workload-note over';
+    } else if (diffSeconds < 15 * 60){
+      workloadNote.textContent = workLabel + ' of tasks, ' + formatDuration(availSeconds) + ' left — ' + formatDuration(diffSeconds) + ' to spare';
+      workloadNote.className = 'workload-note tight';
+    } else {
+      workloadNote.textContent = workLabel + ' of tasks, ' + formatDuration(availSeconds) + ' left — ' + formatDuration(diffSeconds) + ' to spare';
+      workloadNote.className = 'workload-note fits';
+    }
   }
 
   milestoneInput.addEventListener('change', async () => {
@@ -1000,12 +1058,14 @@
     milestoneInput.value = config.milestone;
     await saveConfig();
     updateMeetingCountdown();
+    updateWorkloadNote();
   });
 
   meetingTimeInput.addEventListener('change', async () => {
     config.meetingTime = meetingTimeInput.value || DEFAULT_MEETING_TIME;
     await saveConfig();
     updateMeetingCountdown();
+    updateWorkloadNote();
   });
 
   async function addTask(){
@@ -1019,6 +1079,7 @@
     await saveConfig();
     mountTaskCard(newTask, tasksEl);
     updateProgressNote();
+    updateWorkloadNote();
     nameInput.value = '';
     minInput.value = 5;
     nameInput.focus();
@@ -1052,7 +1113,8 @@
     config.tasks.forEach(task => mountTaskCard(task, tasksEl));
     updateProgressNote();
     updateMeetingCountdown();
-    setInterval(updateMeetingCountdown, 1000);
+    updateWorkloadNote();
+    setInterval(() => { updateMeetingCountdown(); updateWorkloadNote(); }, 1000);
   }
 
   init();
