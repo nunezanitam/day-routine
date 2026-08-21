@@ -149,6 +149,26 @@
     padding: 5px 8px;
   }
 
+  .reset-row{
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--mist);
+    margin-top: 6px;
+  }
+
+  .reset-row input[type="time"]{
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--surface-2);
+    color: var(--paper);
+    border: none;
+    border-radius: 8px;
+    padding: 4px 7px;
+  }
+
   .progress-note{
     margin-top: 6px;
     font-family: var(--font-mono);
@@ -536,6 +556,67 @@
   }
   .add-task .btn:hover{ background: var(--running); }
 
+  .parking-lot{
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px dashed var(--surface-2);
+    background: var(--surface);
+  }
+
+  .parking-lot-title{
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mist);
+    margin: 0 0 8px;
+  }
+
+  .parking-items{
+    display:flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .parking-item{
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--paper);
+  }
+
+  .parking-item .p-name{ flex: 1; }
+
+  .parking-item .p-mins{
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--mist);
+  }
+
+  .parking-item button{
+    font-family: var(--font-mono);
+    font-size: 11px;
+    border: none;
+    border-radius: 8px;
+    padding: 5px 9px;
+    cursor: pointer;
+  }
+
+  .parking-item .p-add{
+    background: var(--sage);
+    color: var(--ink);
+  }
+  .parking-item .p-add:hover{ background: var(--running); }
+
+  .parking-item .p-dismiss{
+    background: var(--surface-2);
+    color: var(--mist);
+  }
+  .parking-item .p-dismiss:hover{ color: var(--accent); }
+
   .hint{
     font-family: var(--font-mono);
     font-size: 11px;
@@ -543,6 +624,16 @@
     color: var(--mist);
     margin: 10px 0 0;
   }
+
+  .history-link{
+    display: inline-block;
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--running);
+    text-decoration: none;
+  }
+  .history-link:hover{ color: var(--accent); }
 
   @media (prefers-reduced-motion: reduce){
     .ring-fg, .node, .card, .btn{ transition: none; }
@@ -560,6 +651,10 @@
         <input type="text" id="milestoneInput" placeholder="what's the deadline?" value="Milestone" maxlength="40">
         <input type="time" id="meetingTimeInput" value="14:30">
       </div>
+      <div class="reset-row">
+        <label for="dayResetInput">Day resets at</label>
+        <input type="time" id="dayResetInput" value="03:00">
+      </div>
     </div>
     <p class="progress-note" id="progressNote">Loading today's list…</p>
     <p class="workload-note" id="workloadNote"></p>
@@ -576,7 +671,14 @@
     <input type="number" id="newTaskMinutes" min="1" value="5">
     <button class="btn" id="addTaskBtn">Add</button>
   </div>
+
+  <div class="parking-lot" id="parkingLot" hidden>
+    <p class="parking-lot-title">Parking lot — carried over, not on today's list</p>
+    <div class="parking-items" id="parkingItems"></div>
+  </div>
+
   <p class="hint">Tap the circle, ring, or task name to check it off — timer or no timer.<br>Hold the strip on the right and drag to reorder, or nudge with ▲▼. ✕ removes a task for good.</p>
+  <a class="history-link" href="history.html">See what you've gotten done →</a>
 
   <div class="finish">
     <div class="node">✓</div>
@@ -612,6 +714,7 @@
   ];
   const DEFAULT_MEETING_TIME = '14:30';
   const DEFAULT_MILESTONE = 'Milestone';
+  const DEFAULT_DAY_RESET_TIME = '03:00';
 
   const CIRC = 2 * Math.PI * 45;
   const tasksEl = document.getElementById('tasks');
@@ -622,11 +725,25 @@
   const milestoneInput = document.getElementById('milestoneInput');
   const milestoneName = document.getElementById('milestoneName');
   const milestoneName2 = document.getElementById('milestoneName2');
+  const dayResetInput = document.getElementById('dayResetInput');
+  const parkingLotSection = document.getElementById('parkingLot');
+  const parkingItemsEl = document.getElementById('parkingItems');
   const controllers = [];
 
-  function todayKey(){
-    const d = new Date();
+  function dateKeyStr(d){
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+
+  // "Today" doesn't flip at midnight — it flips at config.dayResetTime (default 3am),
+  // so a late night before the reset time still counts as the same logical day.
+  function logicalDayKey(date){
+    date = date || new Date();
+    const [rh, rm] = (config.dayResetTime || DEFAULT_DAY_RESET_TIME).split(':').map(Number);
+    const d = new Date(date);
+    const boundary = new Date(d);
+    boundary.setHours(rh, rm, 0, 0);
+    if (d < boundary) d.setDate(d.getDate() - 1);
+    return dateKeyStr(d);
   }
 
   function formatTime(s){
@@ -647,9 +764,9 @@
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  let config = { tasks: DEFAULT_TASKS, meetingTime: DEFAULT_MEETING_TIME, milestone: DEFAULT_MILESTONE, ticking: false };
+  let config = { tasks: DEFAULT_TASKS, meetingTime: DEFAULT_MEETING_TIME, milestone: DEFAULT_MILESTONE, ticking: false, dayResetTime: DEFAULT_DAY_RESET_TIME, parkingLot: [], lastRolloverKey: null };
   let completions = {};
-  const COMPLETIONS_KEY = 'completions-' + todayKey();
+  let COMPLETIONS_KEY = null;
 
   async function loadConfig(){
     try{
@@ -660,20 +777,161 @@
     }
   }
 
+  async function saveConfig(){
+    try{ await store.set('config-v2', JSON.stringify(config), false); } catch(e){}
+  }
+
   async function loadCompletions(){
+    COMPLETIONS_KEY = 'completions-' + logicalDayKey();
     try{
       const res = await store.get(COMPLETIONS_KEY, false);
       if (res && res.value) completions = JSON.parse(res.value);
     } catch(e){ completions = {}; }
   }
 
-  async function saveConfig(){
-    try{ await store.set('config-v2', JSON.stringify(config), false); } catch(e){}
-  }
-
   async function saveCompletions(){
     try{ await store.set(COMPLETIONS_KEY, JSON.stringify(completions), false); } catch(e){}
   }
+
+  // Superficial "what did I get done" tracking, read by history.html.
+  // Two shapes: recurring/core tasks get a running tally (name -> count of
+  // days completed), since listing "brush teeth" every single day forever
+  // would be useless. One-off tasks get logged individually with a date,
+  // since each is a distinct, interesting thing.
+  let historyLog = [];   // one-off tasks: [{id, name, dateKey, ts}]
+  let tallies = {};      // recurring tasks: { [id]: {name, count, lastDateKey} }
+
+  async function loadHistory(){
+    try{
+      const res = await store.get('history', false);
+      if (res && res.value) historyLog = JSON.parse(res.value);
+    } catch(e){ historyLog = []; }
+    try{
+      const res = await store.get('tallies', false);
+      if (res && res.value) tallies = JSON.parse(res.value);
+    } catch(e){ tallies = {}; }
+  }
+
+  async function saveHistory(){
+    try{ await store.set('history', JSON.stringify(historyLog), false); } catch(e){}
+  }
+
+  async function saveTallies(){
+    try{ await store.set('tallies', JSON.stringify(tallies), false); } catch(e){}
+  }
+
+  function logCompletion(task){
+    const dayKey = logicalDayKey();
+    if (task.oneOff){
+      historyLog.push({ id: task.id, name: task.name, dateKey: dayKey, ts: Date.now() });
+      saveHistory();
+      return;
+    }
+    const t = tallies[task.id] || { name: task.name, count: 0, lastDateKey: null };
+    t.name = task.name; // keep in sync if renamed
+    if (t.lastDateKey !== dayKey){
+      t.count += 1;
+      t.lastDateKey = dayKey;
+    }
+    tallies[task.id] = t;
+    saveTallies();
+  }
+
+  function unlogCompletion(task){
+    const dayKey = logicalDayKey();
+    if (task.oneOff){
+      for (let i = historyLog.length - 1; i >= 0; i--){
+        if (historyLog[i].id === task.id && historyLog[i].dateKey === dayKey){
+          historyLog.splice(i, 1);
+          break;
+        }
+      }
+      saveHistory();
+      return;
+    }
+    const t = tallies[task.id];
+    if (t && t.lastDateKey === dayKey){
+      t.count = Math.max(0, t.count - 1);
+      t.lastDateKey = null;
+      saveTallies();
+    }
+  }
+
+  // On the first load after a day-boundary has passed, sweep any one-off tasks
+  // (added via the add-task box, not the core routine) that weren't finished
+  // into the parking lot, and drop the ones that were finished.
+  async function performRollover(){
+    const currentKey = logicalDayKey();
+    if (!config.lastRolloverKey){
+      config.lastRolloverKey = currentKey;
+      await saveConfig();
+      return;
+    }
+    if (config.lastRolloverKey === currentKey) return;
+
+    let priorCompletions = {};
+    try{
+      const res = await store.get('completions-' + config.lastRolloverKey, false);
+      if (res && res.value) priorCompletions = JSON.parse(res.value);
+    } catch(e){ priorCompletions = {}; }
+
+    config.parkingLot = config.parkingLot || [];
+    const keep = [];
+    for (const task of config.tasks){
+      if (!task.oneOff){ keep.push(task); continue; }
+      if (priorCompletions[task.id]) continue; // finished — just drop it
+      config.parkingLot.push({ id: task.id, name: task.name, minutes: task.minutes, note: task.note });
+    }
+    config.tasks = keep;
+
+    config.lastRolloverKey = currentKey;
+    await saveConfig();
+  }
+
+  function renderParkingLot(){
+    const items = config.parkingLot || [];
+    parkingItemsEl.innerHTML = '';
+    parkingLotSection.hidden = items.length === 0;
+    for (const item of items){
+      const row = document.createElement('div');
+      row.className = 'parking-item';
+      row.innerHTML = `
+        <span class="p-name">${escapeHtml(item.name)}</span>
+        <span class="p-mins">${item.minutes} min</span>
+        <button class="p-add" data-id="${item.id}" type="button">Add to today</button>
+        <button class="p-dismiss" data-id="${item.id}" type="button" aria-label="Dismiss">✕</button>
+      `;
+      parkingItemsEl.appendChild(row);
+    }
+  }
+
+  async function addFromParkingLot(id){
+    const idx = (config.parkingLot || []).findIndex(t => t.id === id);
+    if (idx === -1) return;
+    const item = config.parkingLot[idx];
+    config.parkingLot.splice(idx, 1);
+    const newTask = { id: 'task-' + Date.now(), name: item.name, minutes: item.minutes, oneOff: true };
+    if (item.note) newTask.note = item.note;
+    config.tasks.push(newTask);
+    await saveConfig();
+    mountTaskCard(newTask, tasksEl);
+    updateProgressNote();
+    updateWorkloadNote();
+    renderParkingLot();
+  }
+
+  async function dismissFromParkingLot(id){
+    config.parkingLot = (config.parkingLot || []).filter(t => t.id !== id);
+    await saveConfig();
+    renderParkingLot();
+  }
+
+  parkingItemsEl.addEventListener('click', (ev) => {
+    const addBtn = ev.target.closest('.p-add');
+    const dismissBtn = ev.target.closest('.p-dismiss');
+    if (addBtn) addFromParkingLot(addBtn.dataset.id);
+    else if (dismissBtn) dismissFromParkingLot(dismissBtn.dataset.id);
+  });
 
   function updateProgressNote(){
     const total = config.tasks.length;
@@ -859,6 +1117,7 @@
       nodeEl.textContent = '✓';
       completions[task.id] = true;
       saveCompletions();
+      logCompletion(task);
       updateProgressNote();
       updateWorkloadNote();
       if (fromTimer) chime();
@@ -875,6 +1134,7 @@
       nodeEl.textContent = '';
       delete completions[task.id];
       saveCompletions();
+      unlogCompletion(task);
       updateProgressNote();
       updateWorkloadNote();
     }
@@ -1068,13 +1328,19 @@
     updateWorkloadNote();
   });
 
+  dayResetInput.addEventListener('change', async () => {
+    config.dayResetTime = dayResetInput.value || DEFAULT_DAY_RESET_TIME;
+    dayResetInput.value = config.dayResetTime;
+    await saveConfig();
+  });
+
   async function addTask(){
     const nameInput = document.getElementById('newTaskName');
     const minInput = document.getElementById('newTaskMinutes');
     const name = nameInput.value.trim();
     const minutes = Math.max(1, parseInt(minInput.value, 10) || 5);
     if (!name) return;
-    const newTask = { id: 'task-' + Date.now(), name, minutes };
+    const newTask = { id: 'task-' + Date.now(), name, minutes, oneOff: true };
     config.tasks.push(newTask);
     await saveConfig();
     mountTaskCard(newTask, tasksEl);
@@ -1106,11 +1372,15 @@
 
   async function init(){
     await loadConfig();
+    await performRollover();
     await loadCompletions();
+    await loadHistory();
     meetingTimeInput.value = config.meetingTime || DEFAULT_MEETING_TIME;
     milestoneInput.value = config.milestone || DEFAULT_MILESTONE;
+    dayResetInput.value = config.dayResetTime || DEFAULT_DAY_RESET_TIME;
     renderTickToggle();
     config.tasks.forEach(task => mountTaskCard(task, tasksEl));
+    renderParkingLot();
     updateProgressNote();
     updateMeetingCountdown();
     updateWorkloadNote();

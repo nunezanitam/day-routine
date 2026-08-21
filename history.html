@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Completed — Daily Routine</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#E9EEE3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1C1B24" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink: #E9EEE3;
+    --surface: #FBFCF8;
+    --surface-2: #D9E1D1;
+    --mist: #6F7869;
+    --paper: #2C2740;
+    --accent: #5F4B8B;
+    --running: #7A5FBF;
+    --sage: #6F8F68;
+
+    --font-display: 'Outfit', 'Helvetica Neue', Helvetica, sans-serif;
+    --font-body: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --font-mono: 'Space Mono', monospace;
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root{
+      --ink: #1C1B24;
+      --surface: #26242F;
+      --surface-2: #322F40;
+      --mist: #8E8A9C;
+      --paper: #E8EAE2;
+      --accent: #B9A5E8;
+      --running: #A98CE0;
+      --sage: #9BBE90;
+    }
+  }
+
+  *{ box-sizing:border-box; }
+
+  html,body{
+    margin:0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--font-body);
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .page{
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+  }
+
+  .back-link{
+    display:inline-block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--running);
+    text-decoration: none;
+    margin-bottom: 18px;
+  }
+  .back-link:hover{ color: var(--accent); }
+
+  h1{
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 26px;
+    margin: 0 0 4px;
+  }
+
+  .subtitle{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--mist);
+    margin: 0 0 28px;
+  }
+
+  .day-group{
+    margin-bottom: 22px;
+  }
+
+  .day-heading{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--sage);
+    margin: 0 0 8px;
+    display:flex;
+    align-items:baseline;
+    gap: 8px;
+  }
+
+  .day-count{
+    color: var(--mist);
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .task-list{
+    list-style:none;
+    margin:0;
+    padding:0;
+    display:flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .task-list li{
+    font-family: var(--font-body);
+    font-size: 15px;
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 8px 12px;
+  }
+
+  .empty-state{
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--mist);
+    line-height: 1.7;
+    margin-top: 20px;
+  }
+
+  .section-label{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mist);
+    margin: 28px 0 8px;
+  }
+  .section-label:first-child{ margin-top: 0; }
+
+  .tally-list{
+    list-style:none;
+    margin:0 0 8px;
+    padding:0;
+    display:flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .tally-list li{
+    font-family: var(--font-body);
+    font-size: 15px;
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 8px 12px;
+    display:flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .tally-count{
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--accent);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <a class="back-link" href="index.html">← Back to today</a>
+  <h1>What you've gotten done</h1>
+  <p class="subtitle" id="subtitle">Loading…</p>
+  <div id="tallies"></div>
+  <div id="log"></div>
+</div>
+
+<script>
+  const store = (window.storage && typeof window.storage.get === 'function')
+    ? window.storage
+    : {
+        get: async (k) => {
+          const v = localStorage.getItem(k);
+          if (v === null) throw new Error('not found');
+          return { key: k, value: v };
+        }
+      };
+
+  function formatDay(dateKey){
+    const [y, m, d] = dateKey.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  async function init(){
+    const subtitle = document.getElementById('subtitle');
+    const talliesEl = document.getElementById('tallies');
+    const logEl = document.getElementById('log');
+
+    let history = [];
+    try{
+      const res = await store.get('history', false);
+      if (res && res.value) history = JSON.parse(res.value);
+    } catch(e){ history = []; }
+
+    let tallies = {};
+    try{
+      const res = await store.get('tallies', false);
+      if (res && res.value) tallies = JSON.parse(res.value);
+    } catch(e){ tallies = {}; }
+
+    const tallyEntries = Object.values(tallies).filter(t => t.count > 0);
+
+    if (!history.length && !tallyEntries.length){
+      subtitle.textContent = 'Nothing logged yet.';
+      logEl.innerHTML = '<p class="empty-state">Once you start checking things off on the main page, they\'ll show up here — routine tasks as a running tally, one-off tasks with the day you did them.</p>';
+      return;
+    }
+
+    const totalTally = tallyEntries.reduce((sum, t) => sum + t.count, 0);
+    const parts = [];
+    if (tallyEntries.length) parts.push(totalTally + ' routine check-off' + (totalTally === 1 ? '' : 's'));
+    if (history.length) parts.push(history.length + ' one-off task' + (history.length === 1 ? '' : 's'));
+    subtitle.textContent = parts.join(' · ');
+
+    if (tallyEntries.length){
+      tallyEntries.sort((a, b) => b.count - a.count);
+      talliesEl.innerHTML = '<p class="section-label">Routine tasks</p><ul class="tally-list">' +
+        tallyEntries.map(t => `<li>${escapeHtml(t.name)} <span class="tally-count">${t.count}</span></li>`).join('') +
+        '</ul>';
+    }
+
+    if (!history.length) return;
+
+    const byDay = {};
+    for (const entry of history){
+      (byDay[entry.dateKey] = byDay[entry.dateKey] || []).push(entry);
+    }
+    const dayKeys = Object.keys(byDay).sort().reverse();
+
+    const dayHtml = dayKeys.map(dayKey => {
+      const entries = byDay[dayKey];
+      const items = entries.map(e => `<li>${escapeHtml(e.name)}</li>`).join('');
+      return `
+        <div class="day-group">
+          <p class="day-heading">${formatDay(dayKey)} <span class="day-count">— ${entries.length}</span></p>
+          <ul class="task-list">${items}</ul>
+        </div>
+      `;
+    }).join('');
+
+    logEl.innerHTML = '<p class="section-label">One-off tasks</p>' + dayHtml;
+  }
+
+  init();
+</script>
+</body>
+</html>
