@@ -187,10 +187,16 @@
   .workload-note.tight{ color: var(--running); }
   .workload-note.over{ color: var(--accent); font-weight: 700; }
 
+  .toggle-row{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
   .tick-toggle{
     font-family: var(--font-mono);
     font-size: 11px;
-    margin-top: 8px;
     padding: 6px 12px;
     border-radius: 999px;
     border: 1px solid var(--surface-2);
@@ -206,6 +212,16 @@
     background: var(--accent);
     border-color: var(--accent);
     color: var(--ink);
+  }
+
+  .tick-toggle:disabled{
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .tick-toggle:disabled:hover{
+    border-color: var(--surface-2);
+    color: var(--mist);
   }
 
   .runway{
@@ -658,7 +674,10 @@
     </div>
     <p class="progress-note" id="progressNote">Loading today's list…</p>
     <p class="workload-note" id="workloadNote"></p>
-    <button class="tick-toggle" id="tickToggle" type="button">🔇 Ticking off</button>
+    <div class="toggle-row">
+      <button class="tick-toggle" id="tickToggle" type="button">🔇 Ticking off</button>
+      <button class="tick-toggle" id="wakeToggle" type="button">💤 Screen sleeps</button>
+    </div>
   </header>
 
   <div class="runway">
@@ -764,7 +783,7 @@
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  let config = { tasks: DEFAULT_TASKS, meetingTime: DEFAULT_MEETING_TIME, milestone: DEFAULT_MILESTONE, ticking: false, dayResetTime: DEFAULT_DAY_RESET_TIME, parkingLot: [], lastRolloverKey: null };
+  let config = { tasks: DEFAULT_TASKS, meetingTime: DEFAULT_MEETING_TIME, milestone: DEFAULT_MILESTONE, ticking: false, wakeLock: false, dayResetTime: DEFAULT_DAY_RESET_TIME, parkingLot: [], lastRolloverKey: null };
   let completions = {};
   let COMPLETIONS_KEY = null;
 
@@ -1370,6 +1389,51 @@
     await saveConfig();
   });
 
+  /* ---------- screen wake lock ----------
+     Keeps the screen from sleeping so a running timer stays visible and audible.
+     The browser silently drops the lock whenever the page is hidden, so it has
+     to be re-requested on every return to visibility, not just on toggle. */
+  const wakeToggle = document.getElementById('wakeToggle');
+  const wakeSupported = ('wakeLock' in navigator);
+  let wakeSentinel = null;
+
+  function renderWakeToggle(){
+    if (!wakeSupported){
+      wakeToggle.textContent = '💤 Screen sleeps (unsupported)';
+      wakeToggle.disabled = true;
+      return;
+    }
+    wakeToggle.textContent = config.wakeLock ? '👁 Screen stays on' : '💤 Screen sleeps';
+    wakeToggle.classList.toggle('on', !!config.wakeLock);
+  }
+
+  async function acquireWakeLock(){
+    if (!wakeSupported || !config.wakeLock || wakeSentinel) return;
+    try{
+      wakeSentinel = await navigator.wakeLock.request('screen');
+      wakeSentinel.addEventListener('release', () => { wakeSentinel = null; });
+    } catch(e){ wakeSentinel = null; }
+  }
+
+  async function releaseWakeLock(){
+    if (!wakeSentinel) return;
+    try{ await wakeSentinel.release(); } catch(e){}
+    wakeSentinel = null;
+  }
+
+  wakeToggle.addEventListener('click', async () => {
+    if (!wakeSupported) return;
+    config.wakeLock = !config.wakeLock;
+    renderWakeToggle();
+    if (config.wakeLock) await acquireWakeLock(); // must happen on the user gesture
+    else await releaseWakeLock();
+    await saveConfig();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') acquireWakeLock();
+  });
+
   async function init(){
     await loadConfig();
     await performRollover();
@@ -1379,6 +1443,8 @@
     milestoneInput.value = config.milestone || DEFAULT_MILESTONE;
     dayResetInput.value = config.dayResetTime || DEFAULT_DAY_RESET_TIME;
     renderTickToggle();
+    renderWakeToggle();
+    acquireWakeLock();
     config.tasks.forEach(task => mountTaskCard(task, tasksEl));
     renderParkingLot();
     updateProgressNote();
