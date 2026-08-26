@@ -678,6 +678,12 @@
       <button class="tick-toggle" id="tickToggle" type="button">🔇 Ticking off</button>
       <button class="tick-toggle" id="wakeToggle" type="button">💤 Screen sleeps</button>
     </div>
+    <!-- Silent looping video. iOS drops the Wake Lock API after the normal
+         auto-lock interval, but keeps the screen awake while a video plays.
+         Must stay rendered (not display:none) for playback to count. -->
+    <video id="wakeVideo" muted loop playsinline
+           style="position:fixed;width:1px;height:1px;opacity:0.01;pointer-events:none;bottom:0;left:0;"
+           src="data:video/mp4;base64,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"></video>
   </header>
 
   <div class="runway">
@@ -1394,20 +1400,28 @@
      The browser silently drops the lock whenever the page is hidden, so it has
      to be re-requested on every return to visibility, not just on toggle. */
   const wakeToggle = document.getElementById('wakeToggle');
+  const wakeVideo = document.getElementById('wakeVideo');
   const wakeSupported = ('wakeLock' in navigator);
   let wakeSentinel = null;
 
   function renderWakeToggle(){
-    if (!wakeSupported){
-      wakeToggle.textContent = '💤 Screen sleeps (unsupported)';
-      wakeToggle.disabled = true;
-      return;
-    }
     wakeToggle.textContent = config.wakeLock ? '👁 Screen stays on' : '💤 Screen sleeps';
     wakeToggle.classList.toggle('on', !!config.wakeLock);
   }
 
+  function playWakeVideo(){
+    if (!wakeVideo || !config.wakeLock) return;
+    wakeVideo.muted = true; // iOS only allows silent autoplay
+    const p = wakeVideo.play();
+    if (p && p.catch) p.catch(() => {});
+  }
+
+  function pauseWakeVideo(){
+    if (wakeVideo) { try{ wakeVideo.pause(); } catch(e){} }
+  }
+
   async function acquireWakeLock(){
+    playWakeVideo();
     if (!wakeSupported || !config.wakeLock || wakeSentinel) return;
     try{
       wakeSentinel = await navigator.wakeLock.request('screen');
@@ -1416,13 +1430,13 @@
   }
 
   async function releaseWakeLock(){
+    pauseWakeVideo();
     if (!wakeSentinel) return;
     try{ await wakeSentinel.release(); } catch(e){}
     wakeSentinel = null;
   }
 
   wakeToggle.addEventListener('click', async () => {
-    if (!wakeSupported) return;
     config.wakeLock = !config.wakeLock;
     renderWakeToggle();
     if (config.wakeLock) await acquireWakeLock(); // must happen on the user gesture
