@@ -818,6 +818,92 @@
     try{ await store.set(COMPLETIONS_KEY, JSON.stringify(completions), false); } catch(e){}
   }
 
+  /* ---------- cloud sync (Google Sheet) ----------
+     localStorage is disposable — clearing cache or deleting the home screen
+     app wipes it. The sheet is the permanent record. History rows are
+     append-only (posted as they happen); the parking lot is small and gets
+     replaced wholesale on every change. On load, the sheet wins: it rebuilds
+     historyLog/tallies from scratch and overwrites the local parking lot,
+     since with one real client there's no meaningful conflict to resolve. */
+  const SYNC_URL = 'https://script.google.com/macros/s/AKfycbw8Wu_jjY5vcW6Jas6ePSlFRb64-kb7cRWsg33D0yThmW3c-Mk1AXrIunTfZuy2XZcwFw/exec';
+
+  async function syncPost(payload){
+    if (!SYNC_URL) return;
+    try{
+      // no-cors: Apps Script doesn't return usable CORS headers for us to
+      // read the response anyway, and we don't need to — writes are fire-and-forget.
+      await fetch(SYNC_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' }, // avoids a CORS preflight
+        body: JSON.stringify(payload)
+      });
+    } catch(e){ /* offline or blocked — local copy still holds, will retry next change */ }
+  }
+
+  function syncLogRow(task, action){
+    syncPost({ rows: [{
+      ts: Date.now(),
+      dateKey: logicalDayKey(),
+      taskId: task.id,
+      taskName: task.name,
+      type: task.oneOff ? 'oneoff' : 'recurring',
+      action: action
+    }]});
+  }
+
+  function syncParking(){
+    syncPost({ parking: config.parkingLot || [] });
+  }
+
+  /** Rebuild historyLog + tallies from the sheet's append-only rows. */
+  function replayHistoryFromRows(rows){
+    historyLog = [];
+    tallies = {};
+    for (const r of rows){
+      if (r.type === 'oneoff'){
+        if (r.action === 'done'){
+          historyLog.push({ id: r.taskId, name: r.taskName, dateKey: r.dateKey, ts: r.ts });
+        } else if (r.action === 'undo'){
+          for (let i = historyLog.length - 1; i >= 0; i--){
+            if (historyLog[i].id === r.taskId && historyLog[i].dateKey === r.dateKey){
+              historyLog.splice(i, 1);
+              break;
+            }
+          }
+        }
+        continue;
+      }
+      const t = tallies[r.taskId] || { name: r.taskName, count: 0, lastDateKey: null };
+      t.name = r.taskName;
+      if (r.action === 'done'){
+        if (t.lastDateKey !== r.dateKey){ t.count += 1; t.lastDateKey = r.dateKey; }
+      } else if (r.action === 'undo'){
+        if (t.lastDateKey === r.dateKey){ t.count = Math.max(0, t.count - 1); t.lastDateKey = null; }
+      }
+      tallies[r.taskId] = t;
+    }
+  }
+
+  /** Pull the sheet's copy of history + parking lot and let it win locally. */
+  async function syncPullAll(){
+    if (!SYNC_URL) return;
+    try{
+      const res = await fetch(SYNC_URL, { method: 'GET' });
+      const data = await res.json();
+      if (!data || !data.ok) return;
+      if (Array.isArray(data.rows)){
+        replayHistoryFromRows(data.rows);
+        await saveHistory();
+        await saveTallies();
+      }
+      if (Array.isArray(data.parking)){
+        config.parkingLot = data.parking;
+        await saveConfig();
+      }
+    } catch(e){ /* offline — local cached copy is still shown */ }
+  }
+
   // Superficial "what did I get done" tracking, read by history.html.
   // Two shapes: recurring/core tasks get a running tally (name -> count of
   // days completed), since listing "brush teeth" every single day forever
@@ -847,6 +933,7 @@
 
   function logCompletion(task){
     const dayKey = logicalDayKey();
+    syncLogRow(task, 'done');
     if (task.oneOff){
       historyLog.push({ id: task.id, name: task.name, dateKey: dayKey, ts: Date.now() });
       saveHistory();
@@ -864,6 +951,7 @@
 
   function unlogCompletion(task){
     const dayKey = logicalDayKey();
+    syncLogRow(task, 'undo');
     if (task.oneOff){
       for (let i = historyLog.length - 1; i >= 0; i--){
         if (historyLog[i].id === task.id && historyLog[i].dateKey === dayKey){
@@ -911,6 +999,7 @@
 
     config.lastRolloverKey = currentKey;
     await saveConfig();
+    syncParking();
   }
 
   function renderParkingLot(){
@@ -939,6 +1028,7 @@
     if (item.note) newTask.note = item.note;
     config.tasks.push(newTask);
     await saveConfig();
+    syncParking();
     mountTaskCard(newTask, tasksEl);
     updateProgressNote();
     updateWorkloadNote();
@@ -948,6 +1038,7 @@
   async function dismissFromParkingLot(id){
     config.parkingLot = (config.parkingLot || []).filter(t => t.id !== id);
     await saveConfig();
+    syncParking();
     renderParkingLot();
   }
 
@@ -1465,6 +1556,12 @@
     updateMeetingCountdown();
     updateWorkloadNote();
     setInterval(() => { updateMeetingCountdown(); updateWorkloadNote(); }, 1000);
+
+    // Local data renders immediately above so the app is usable right away;
+    // the sheet's copy (the permanent record) arrives a moment later and
+    // wins, so a re-render picks up anything the cache didn't have.
+    await syncPullAll();
+    renderParkingLot();
   }
 
   init();
