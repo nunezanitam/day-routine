@@ -1165,6 +1165,7 @@
             '<span class="est">' + task.minutes + ' min</span>' +
             '<button class="icon-btn move-btn move-up" title="Move up">▲</button>' +
             '<button class="icon-btn move-btn move-down" title="Move down">▼</button>' +
+            (task.oneOff ? '<button class="icon-btn park-btn" title="Move to parking lot">📥</button>' : '') +
             '<button class="icon-btn remove-btn" title="Remove task">✕</button>' +
           '</div>' +
         '</div>' +
@@ -1308,6 +1309,27 @@
       updateProgressNote();
       updateWorkloadNote();
     });
+
+    const parkBtn = el.querySelector('.park-btn');
+    if (parkBtn){
+      parkBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        stopTimer();
+        config.tasks = config.tasks.filter(t => t.id !== task.id);
+        delete completions[task.id];
+        config.parkingLot = config.parkingLot || [];
+        const parked = { id: task.id, name: task.name, minutes: task.minutes };
+        if (task.note) parked.note = task.note;
+        config.parkingLot.push(parked);
+        await saveConfig();
+        await saveCompletions();
+        syncParking();
+        el.remove();
+        renderParkingLot();
+        updateProgressNote();
+        updateWorkloadNote();
+      });
+    }
 
     const estEl = el.querySelector('.est');
     const optBtns = [...el.querySelectorAll('.opt')];
