@@ -80,6 +80,34 @@
 
   header{ margin-bottom: 22px; }
 
+  .mode-tabs{
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .mode-tab{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--surface-2);
+    background: var(--surface);
+    color: var(--mist);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+
+  .mode-tab:hover{ border-color: var(--accent); color: var(--accent); }
+
+  .mode-tab.active{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--ink);
+  }
+
   .eyebrow{
     font-family: var(--font-mono);
     font-size: 11px;
@@ -662,18 +690,22 @@
 <body>
 <div class="page">
   <header>
-    <p class="eyebrow">Daily routine · resets each day</p>
-    <h1>Runway to <span id="meetingTimeLabel">2:30 PM</span></h1>
-    <div class="meeting-row">
+    <div class="mode-tabs" id="modeTabs">
+      <button class="mode-tab" data-mode="morning" type="button">☀️ Morning</button>
+      <button class="mode-tab" data-mode="night" type="button">🌙 Night</button>
+    </div>
+    <p class="eyebrow" id="eyebrow">Morning routine · resets each day</p>
+    <h1><span id="titleMorning">Runway to <span id="meetingTimeLabel">2:30 PM</span></span><span id="titleNight" hidden>Night Routine</span></h1>
+    <div class="meeting-row" id="meetingRow">
       <p class="meeting-countdown"><span id="milestoneName">Meeting</span> in <span id="meetingMins">—</span></p>
       <div class="meeting-time-edit">
         <input type="text" id="milestoneInput" placeholder="what's the deadline?" value="Milestone" maxlength="40">
         <input type="time" id="meetingTimeInput" value="14:30">
       </div>
-      <div class="reset-row">
-        <label for="dayResetInput">Day resets at</label>
-        <input type="time" id="dayResetInput" value="03:00">
-      </div>
+    </div>
+    <div class="reset-row">
+      <label for="dayResetInput">Day resets at</label>
+      <input type="time" id="dayResetInput" value="03:00">
     </div>
     <p class="progress-note" id="progressNote">Loading today's list…</p>
     <p class="workload-note" id="workloadNote"></p>
@@ -706,14 +738,14 @@
   </div>
 
   <p class="hint">Tap the circle, ring, or task name to check it off — timer or no timer.<br>Hold the strip on the right and drag to reorder, or nudge with ▲▼. ✕ removes a task for good.</p>
-  <a class="history-link" href="history.html">See what you've gotten done →</a>
+  <a class="history-link" id="historyLink" href="history.html">See what you've gotten done →</a>
 
   <div class="finish">
     <div class="node">✓</div>
-    <p><strong id="meetingTimeLabel2">2:30 PM</strong> — <span id="milestoneName2">Meeting</span></p>
+    <p id="finishTextMorning"><strong id="meetingTimeLabel2">2:30 PM</strong> — <span id="milestoneName2">Meeting</span></p>
+    <p id="finishTextNight" hidden>All done — lights out.</p>
   </div>
 </div>
-
 <script>
   /* Claude artifacts provide window.storage; anywhere else, fall back to
      localStorage so the file works as a self-hosted page too. */
@@ -728,7 +760,7 @@
         set: async (k, v) => { localStorage.setItem(k, v); return { key: k, value: v }; }
       };
 
-  const DEFAULT_TASKS = [
+  const DEFAULT_MORNING_TASKS = [
     { id: 't1', name: 'Tidy bed', minutes: 3 },
     { id: 't2', name: 'Brush teeth', minutes: 3 },
     { id: 't3', name: 'Do hair', minutes: 2 },
@@ -740,9 +772,50 @@
     { id: 't9', name: 'Clean litter boxes', minutes: 10 },
     { id: 't10', name: 'Morning tidy sweep', minutes: 5 },
   ];
+
+  const DEFAULT_NIGHT_TASKS = [
+    { id: 'n1', name: 'Put out medicine for Brandyn', minutes: 2 },
+    { id: 'n2', name: 'Clean litter boxes', minutes: 7 },
+    { id: 'n3', name: 'Brush teeth', minutes: 4 },
+    { id: 'n4', name: 'Wash face', minutes: 2 },
+    { id: 'n5', name: 'Take sleep supplements', minutes: 3 },
+    { id: 'n6', name: 'Drink magnesium powder', minutes: 3 },
+    { id: 'n7', name: 'Nighttime journal', minutes: 10 },
+    { id: 'n8', name: 'Fill water bottles', minutes: 3 },
+  ];
+
   const DEFAULT_MEETING_TIME = '14:30';
   const DEFAULT_MILESTONE = 'Milestone';
   const DEFAULT_DAY_RESET_TIME = '03:00';
+
+  // Cloud sync is only wired up for the morning sheet today. Night stays
+  // local-only until the Apps Script is updated to route rows into its own
+  // tabs (Night Routine Log / Night Parking Lot) — flip syncEnabled to true
+  // once that's done.
+  const MODES = {
+    morning: {
+      label: 'Morning',
+      configKey: 'config-v2',
+      completionsPrefix: 'completions-',
+      historyKey: 'history',
+      talliesKey: 'tallies',
+      defaultTasks: DEFAULT_MORNING_TASKS,
+      hasMilestone: true,
+      eyebrow: 'Morning routine · resets each day',
+      syncEnabled: true,
+    },
+    night: {
+      label: 'Night',
+      configKey: 'config-v2-night',
+      completionsPrefix: 'completions-night-',
+      historyKey: 'history-night',
+      talliesKey: 'tallies-night',
+      defaultTasks: DEFAULT_NIGHT_TASKS,
+      hasMilestone: false,
+      eyebrow: 'Night routine · resets each day',
+      syncEnabled: true,
+    },
+  };
 
   const CIRC = 2 * Math.PI * 45;
   const tasksEl = document.getElementById('tasks');
@@ -756,17 +829,26 @@
   const dayResetInput = document.getElementById('dayResetInput');
   const parkingLotSection = document.getElementById('parkingLot');
   const parkingItemsEl = document.getElementById('parkingItems');
+  const eyebrowEl = document.getElementById('eyebrow');
+  const titleMorning = document.getElementById('titleMorning');
+  const titleNight = document.getElementById('titleNight');
+  const meetingRow = document.getElementById('meetingRow');
+  const finishTextMorning = document.getElementById('finishTextMorning');
+  const finishTextNight = document.getElementById('finishTextNight');
+  const historyLink = document.getElementById('historyLink');
+  const modeTabButtons = [...document.querySelectorAll('.mode-tab')];
   const controllers = [];
 
   function dateKeyStr(d){
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   }
 
-  // "Today" doesn't flip at midnight — it flips at config.dayResetTime (default 3am),
+  // "Today" doesn't flip at midnight — it flips at prefs.dayResetTime (default 3am),
   // so a late night before the reset time still counts as the same logical day.
+  // Shared by both modes: one calendar boundary for the whole app.
   function logicalDayKey(date){
     date = date || new Date();
-    const [rh, rm] = (config.dayResetTime || DEFAULT_DAY_RESET_TIME).split(':').map(Number);
+    const [rh, rm] = (prefs.dayResetTime || DEFAULT_DAY_RESET_TIME).split(':').map(Number);
     const d = new Date(date);
     const boundary = new Date(d);
     boundary.setHours(rh, rm, 0, 0);
@@ -792,36 +874,101 @@
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  let config = { tasks: DEFAULT_TASKS, meetingTime: DEFAULT_MEETING_TIME, milestone: DEFAULT_MILESTONE, ticking: false, wakeLock: false, dayResetTime: DEFAULT_DAY_RESET_TIME, parkingLot: [], lastRolloverKey: null };
-  let completions = {};
-  let COMPLETIONS_KEY = null;
+  /* ---------- global prefs (shared across both modes) ---------- */
+  const DEFAULT_PREFS = { ticking: false, wakeLock: false, dayResetTime: DEFAULT_DAY_RESET_TIME };
+  let prefs = Object.assign({}, DEFAULT_PREFS);
 
-  async function loadConfig(){
+  async function loadGlobalPrefs(){
     try{
-      const res = await store.get('config-v2', false);
-      if (res && res.value) config = JSON.parse(res.value);
+      const res = await store.get('app-prefs-v1', false);
+      if (res && res.value){ prefs = Object.assign({}, DEFAULT_PREFS, JSON.parse(res.value)); return; }
+      throw new Error('no prefs yet');
     } catch(e){
-      try{ await store.set('config-v2', JSON.stringify(config), false); } catch(e2){}
+      // First run under the tabbed build — carry Anita's existing ticking/
+      // wake-lock/day-reset settings out of the old morning config-v2 so
+      // nothing resets silently.
+      try{
+        const res2 = await store.get('config-v2', false);
+        if (res2 && res2.value){
+          const old = JSON.parse(res2.value);
+          if (typeof old.ticking === 'boolean') prefs.ticking = old.ticking;
+          if (typeof old.wakeLock === 'boolean') prefs.wakeLock = old.wakeLock;
+          if (old.dayResetTime) prefs.dayResetTime = old.dayResetTime;
+        }
+      } catch(e2){}
+      try{ await store.set('app-prefs-v1', JSON.stringify(prefs), false); } catch(e3){}
     }
   }
 
-  async function saveConfig(){
-    try{ await store.set('config-v2', JSON.stringify(config), false); } catch(e){}
+  async function savePrefs(){
+    try{ await store.set('app-prefs-v1', JSON.stringify(prefs), false); } catch(e){}
   }
 
-  async function loadCompletions(){
-    COMPLETIONS_KEY = 'completions-' + logicalDayKey();
+  /* ---------- per-mode config / completions / history ---------- */
+  let currentMode = 'morning';
+  let config = null;
+  let completions = {};
+  let COMPLETIONS_KEY = null;
+  let historyLog = [];   // one-off tasks: [{id, name, dateKey, ts}]
+  let tallies = {};      // recurring tasks: { [id]: {name, count, lastDateKey} }
+
+  function defaultConfigFor(mode){
+    return {
+      tasks: MODES[mode].defaultTasks.map(t => Object.assign({}, t)),
+      milestone: DEFAULT_MILESTONE,
+      meetingTime: DEFAULT_MEETING_TIME,
+      parkingLot: [],
+      lastRolloverKey: null,
+    };
+  }
+
+  async function loadModeData(mode){
+    const def = MODES[mode];
+    config = defaultConfigFor(mode);
+    try{
+      const res = await store.get(def.configKey, false);
+      if (res && res.value) config = Object.assign(config, JSON.parse(res.value));
+    } catch(e){
+      try{ await store.set(def.configKey, JSON.stringify(config), false); } catch(e2){}
+    }
+
+    COMPLETIONS_KEY = def.completionsPrefix + logicalDayKey();
+    completions = {};
     try{
       const res = await store.get(COMPLETIONS_KEY, false);
       if (res && res.value) completions = JSON.parse(res.value);
     } catch(e){ completions = {}; }
+
+    historyLog = [];
+    try{
+      const res = await store.get(def.historyKey, false);
+      if (res && res.value) historyLog = JSON.parse(res.value);
+    } catch(e){ historyLog = []; }
+
+    tallies = {};
+    try{
+      const res = await store.get(def.talliesKey, false);
+      if (res && res.value) tallies = JSON.parse(res.value);
+    } catch(e){ tallies = {}; }
+  }
+
+  async function saveConfig(){
+    try{ await store.set(MODES[currentMode].configKey, JSON.stringify(config), false); } catch(e){}
   }
 
   async function saveCompletions(){
     try{ await store.set(COMPLETIONS_KEY, JSON.stringify(completions), false); } catch(e){}
   }
 
-  /* ---------- cloud sync (Google Sheet) ----------
+  async function saveHistory(){
+    try{ await store.set(MODES[currentMode].historyKey, JSON.stringify(historyLog), false); } catch(e){}
+  }
+
+  async function saveTallies(){
+    try{ await store.set(MODES[currentMode].talliesKey, JSON.stringify(tallies), false); } catch(e){}
+  }
+
+  /* ---------- cloud sync (Google Sheet) — morning only for now ----------
      localStorage is disposable — clearing cache or deleting the home screen
      app wipes it. The sheet is the permanent record. History rows are
      append-only (posted as they happen); the parking lot is small and gets
@@ -830,9 +977,10 @@
      since with one real client there's no meaningful conflict to resolve. */
   const SYNC_URL = 'https://script.google.com/macros/s/AKfycbw8Wu_jjY5vcW6Jas6ePSlFRb64-kb7cRWsg33D0yThmW3c-Mk1AXrIunTfZuy2XZcwFw/exec';
 
-  async function syncPost(payload){
-    if (!SYNC_URL) return;
+  async function syncPost(mode, payload){
+    if (!MODES[mode].syncEnabled || !SYNC_URL) return;
     try{
+      payload = Object.assign({ mode }, payload);
       // no-cors: Apps Script doesn't return usable CORS headers for us to
       // read the response anyway, and we don't need to — writes are fire-and-forget.
       await fetch(SYNC_URL, {
@@ -844,8 +992,8 @@
     } catch(e){ /* offline or blocked — local copy still holds, will retry next change */ }
   }
 
-  function syncLogRow(task, action){
-    syncPost({ rows: [{
+  function syncLogRow(mode, task, action){
+    syncPost(mode, { rows: [{
       ts: Date.now(),
       dateKey: logicalDayKey(),
       taskId: task.id,
@@ -855,8 +1003,8 @@
     }]});
   }
 
-  function syncParking(){
-    syncPost({ parking: config.parkingLot || [] });
+  function syncParking(mode){
+    syncPost(mode, { parking: config.parkingLot || [] });
   }
 
   /** Rebuild historyLog + tallies from the sheet's append-only rows. */
@@ -889,10 +1037,11 @@
   }
 
   /** Pull the sheet's copy of history + parking lot and let it win locally. */
-  async function syncPullAll(){
-    if (!SYNC_URL) return;
+  async function syncPullAll(mode){
+    if (!MODES[mode].syncEnabled || !SYNC_URL) return;
     try{
-      const res = await fetch(SYNC_URL, { method: 'GET' });
+      const url = mode === 'morning' ? SYNC_URL : SYNC_URL + '?mode=' + encodeURIComponent(mode);
+      const res = await fetch(url, { method: 'GET' });
       const data = await res.json();
       if (!data || !data.ok) return;
       if (Array.isArray(data.rows)){
@@ -907,36 +1056,9 @@
     } catch(e){ /* offline — local cached copy is still shown */ }
   }
 
-  // Superficial "what did I get done" tracking, read by history.html.
-  // Two shapes: recurring/core tasks get a running tally (name -> count of
-  // days completed), since listing "brush teeth" every single day forever
-  // would be useless. One-off tasks get logged individually with a date,
-  // since each is a distinct, interesting thing.
-  let historyLog = [];   // one-off tasks: [{id, name, dateKey, ts}]
-  let tallies = {};      // recurring tasks: { [id]: {name, count, lastDateKey} }
-
-  async function loadHistory(){
-    try{
-      const res = await store.get('history', false);
-      if (res && res.value) historyLog = JSON.parse(res.value);
-    } catch(e){ historyLog = []; }
-    try{
-      const res = await store.get('tallies', false);
-      if (res && res.value) tallies = JSON.parse(res.value);
-    } catch(e){ tallies = {}; }
-  }
-
-  async function saveHistory(){
-    try{ await store.set('history', JSON.stringify(historyLog), false); } catch(e){}
-  }
-
-  async function saveTallies(){
-    try{ await store.set('tallies', JSON.stringify(tallies), false); } catch(e){}
-  }
-
   function logCompletion(task){
     const dayKey = logicalDayKey();
-    syncLogRow(task, 'done');
+    syncLogRow(currentMode, task, 'done');
     if (task.oneOff){
       historyLog.push({ id: task.id, name: task.name, dateKey: dayKey, ts: Date.now() });
       saveHistory();
@@ -954,7 +1076,7 @@
 
   function unlogCompletion(task){
     const dayKey = logicalDayKey();
-    syncLogRow(task, 'undo');
+    syncLogRow(currentMode, task, 'undo');
     if (task.oneOff){
       for (let i = historyLog.length - 1; i >= 0; i--){
         if (historyLog[i].id === task.id && historyLog[i].dateKey === dayKey){
@@ -975,34 +1097,36 @@
 
   // On the first load after a day-boundary has passed, sweep any one-off tasks
   // (added via the add-task box, not the core routine) that weren't finished
-  // into the parking lot, and drop the ones that were finished.
-  async function performRollover(){
+  // into the parking lot, and drop the ones that were finished. Runs per mode
+  // — each routine keeps its own parking lot.
+  async function performRolloverFor(mode, cfg){
+    const def = MODES[mode];
     const currentKey = logicalDayKey();
-    if (!config.lastRolloverKey){
-      config.lastRolloverKey = currentKey;
-      await saveConfig();
+    if (!cfg.lastRolloverKey){
+      cfg.lastRolloverKey = currentKey;
+      await store.set(def.configKey, JSON.stringify(cfg), false);
       return;
     }
-    if (config.lastRolloverKey === currentKey) return;
+    if (cfg.lastRolloverKey === currentKey) return;
 
     let priorCompletions = {};
     try{
-      const res = await store.get('completions-' + config.lastRolloverKey, false);
+      const res = await store.get(def.completionsPrefix + cfg.lastRolloverKey, false);
       if (res && res.value) priorCompletions = JSON.parse(res.value);
     } catch(e){ priorCompletions = {}; }
 
-    config.parkingLot = config.parkingLot || [];
+    cfg.parkingLot = cfg.parkingLot || [];
     const keep = [];
-    for (const task of config.tasks){
+    for (const task of cfg.tasks){
       if (!task.oneOff){ keep.push(task); continue; }
       if (priorCompletions[task.id]) continue; // finished — just drop it
-      config.parkingLot.push({ id: task.id, name: task.name, minutes: task.minutes, note: task.note });
+      cfg.parkingLot.push({ id: task.id, name: task.name, minutes: task.minutes, note: task.note });
     }
-    config.tasks = keep;
+    cfg.tasks = keep;
 
-    config.lastRolloverKey = currentKey;
-    await saveConfig();
-    syncParking();
+    cfg.lastRolloverKey = currentKey;
+    await store.set(def.configKey, JSON.stringify(cfg), false);
+    if (def.syncEnabled) syncPost(mode, { parking: cfg.parkingLot });
   }
 
   function renderParkingLot(){
@@ -1031,7 +1155,7 @@
     if (item.note) newTask.note = item.note;
     config.tasks.push(newTask);
     await saveConfig();
-    syncParking();
+    syncParking(currentMode);
     mountTaskCard(newTask, tasksEl);
     updateProgressNote();
     updateWorkloadNote();
@@ -1041,7 +1165,7 @@
   async function dismissFromParkingLot(id){
     config.parkingLot = (config.parkingLot || []).filter(t => t.id !== id);
     await saveConfig();
-    syncParking();
+    syncParking(currentMode);
     renderParkingLot();
   }
 
@@ -1267,7 +1391,7 @@
       remaining = left;
       render();
       const wholeSecond = Math.ceil(remaining);
-      if (config.ticking && wholeSecond !== lastTickSecond && wholeSecond > 0){
+      if (prefs.ticking && wholeSecond !== lastTickSecond && wholeSecond > 0){
         lastTickSecond = wholeSecond;
         tick();
       }
@@ -1326,7 +1450,7 @@
         config.parkingLot.push(parked);
         await saveConfig();
         await saveCompletions();
-        syncParking();
+        syncParking(currentMode);
         el.remove();
         renderParkingLot();
         updateProgressNote();
@@ -1377,13 +1501,18 @@
       const next = el.nextElementSibling;
       if (next) { tasksEl.insertBefore(next, el); persistOrder(); }
     });
-    controllers.push({ sync, getRemaining: () => isDone ? 0 : remaining });
+
+    controllers.push({
+      sync,
+      getRemaining: () => isDone ? 0 : remaining,
+      stop: stopTimer,
+    });
   }
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible'){
       controllers.forEach(c => c.sync());
-      updateMeetingCountdown();
+      if (MODES[currentMode].hasMilestone) updateMeetingCountdown();
     }
   });
   window.addEventListener('focus', () => controllers.forEach(c => c.sync()));
@@ -1432,7 +1561,7 @@
       return;
     }
     const workLabel = formatDuration(workSeconds);
-    if (lastMilestoneDiffMs === null){
+    if (!MODES[currentMode].hasMilestone || lastMilestoneDiffMs === null){
       workloadNote.textContent = workLabel + ' of tasks left';
       workloadNote.className = 'workload-note';
       return;
@@ -1458,21 +1587,21 @@
     config.milestone = milestoneInput.value.trim() || DEFAULT_MILESTONE;
     milestoneInput.value = config.milestone;
     await saveConfig();
-    updateMeetingCountdown();
+    if (MODES[currentMode].hasMilestone) updateMeetingCountdown();
     updateWorkloadNote();
   });
 
   meetingTimeInput.addEventListener('change', async () => {
     config.meetingTime = meetingTimeInput.value || DEFAULT_MEETING_TIME;
     await saveConfig();
-    updateMeetingCountdown();
+    if (MODES[currentMode].hasMilestone) updateMeetingCountdown();
     updateWorkloadNote();
   });
 
   dayResetInput.addEventListener('change', async () => {
-    config.dayResetTime = dayResetInput.value || DEFAULT_DAY_RESET_TIME;
-    dayResetInput.value = config.dayResetTime;
-    await saveConfig();
+    prefs.dayResetTime = dayResetInput.value || DEFAULT_DAY_RESET_TIME;
+    dayResetInput.value = prefs.dayResetTime;
+    await savePrefs();
   });
 
   async function addTask(){
@@ -1500,33 +1629,34 @@
   const tickToggle = document.getElementById('tickToggle');
 
   function renderTickToggle(){
-    tickToggle.textContent = config.ticking ? '🔊 Ticking on' : '🔇 Ticking off';
-    tickToggle.classList.toggle('on', !!config.ticking);
+    tickToggle.textContent = prefs.ticking ? '🔊 Ticking on' : '🔇 Ticking off';
+    tickToggle.classList.toggle('on', !!prefs.ticking);
   }
 
   tickToggle.addEventListener('click', async () => {
-    config.ticking = !config.ticking;
+    prefs.ticking = !prefs.ticking;
     renderTickToggle();
-    if (config.ticking) { try{ audioCtx(); } catch(e){} } // unlock audio on the user gesture
-    await saveConfig();
+    if (prefs.ticking) { try{ audioCtx(); } catch(e){} } // unlock audio on the user gesture
+    await savePrefs();
   });
 
   /* ---------- screen wake lock ----------
      Keeps the screen from sleeping so a running timer stays visible and audible.
      The browser silently drops the lock whenever the page is hidden, so it has
-     to be re-requested on every return to visibility, not just on toggle. */
+     to be re-requested on every return to visibility, not just on toggle.
+     Shared across both modes — one screen-behavior preference for the app. */
   const wakeToggle = document.getElementById('wakeToggle');
   const wakeVideo = document.getElementById('wakeVideo');
   const wakeSupported = ('wakeLock' in navigator);
   let wakeSentinel = null;
 
   function renderWakeToggle(){
-    wakeToggle.textContent = config.wakeLock ? '👁 Screen stays on' : '💤 Screen sleeps';
-    wakeToggle.classList.toggle('on', !!config.wakeLock);
+    wakeToggle.textContent = prefs.wakeLock ? '👁 Screen stays on' : '💤 Screen sleeps';
+    wakeToggle.classList.toggle('on', !!prefs.wakeLock);
   }
 
   function playWakeVideo(){
-    if (!wakeVideo || !config.wakeLock) return;
+    if (!wakeVideo || !prefs.wakeLock) return;
     wakeVideo.muted = true; // iOS only allows silent autoplay
     const p = wakeVideo.play();
     if (p && p.catch) p.catch(() => {});
@@ -1538,7 +1668,7 @@
 
   async function acquireWakeLock(){
     playWakeVideo();
-    if (!wakeSupported || !config.wakeLock || wakeSentinel) return;
+    if (!wakeSupported || !prefs.wakeLock || wakeSentinel) return;
     try{
       wakeSentinel = await navigator.wakeLock.request('screen');
       wakeSentinel.addEventListener('release', () => { wakeSentinel = null; });
@@ -1553,43 +1683,107 @@
   }
 
   wakeToggle.addEventListener('click', async () => {
-    config.wakeLock = !config.wakeLock;
+    prefs.wakeLock = !prefs.wakeLock;
     renderWakeToggle();
-    if (config.wakeLock) await acquireWakeLock(); // must happen on the user gesture
+    if (prefs.wakeLock) await acquireWakeLock(); // must happen on the user gesture
     else await releaseWakeLock();
-    await saveConfig();
+    await savePrefs();
   });
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') acquireWakeLock();
   });
 
-  async function init(){
-    await loadConfig();
-    await performRollover();
-    await loadCompletions();
-    await loadHistory();
-    meetingTimeInput.value = config.meetingTime || DEFAULT_MEETING_TIME;
+  /* ---------- mode switching (Morning / Night tabs) ---------- */
+  function updateModeTabsUI(){
+    modeTabButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === currentMode));
+  }
+
+  function renderHeaderForMode(){
+    const def = MODES[currentMode];
+    eyebrowEl.textContent = def.eyebrow;
+    titleMorning.hidden = !def.hasMilestone;
+    titleNight.hidden = def.hasMilestone;
+    meetingRow.hidden = !def.hasMilestone;
+    finishTextMorning.hidden = !def.hasMilestone;
+    finishTextNight.hidden = def.hasMilestone;
+    dayResetInput.value = prefs.dayResetTime || DEFAULT_DAY_RESET_TIME;
     milestoneInput.value = config.milestone || DEFAULT_MILESTONE;
-    dayResetInput.value = config.dayResetTime || DEFAULT_DAY_RESET_TIME;
+    meetingTimeInput.value = config.meetingTime || DEFAULT_MEETING_TIME;
+    historyLink.href = 'history.html' + (currentMode === 'night' ? '?mode=night' : '');
+  }
+
+  async function switchMode(mode){
+    if (mode === currentMode || !MODES[mode]) return;
+    controllers.forEach(c => c.stop());
+    controllers.length = 0;
+    tasksEl.innerHTML = '';
+    lastMilestoneDiffMs = null;
+    currentMode = mode;
+    await loadModeData(mode);
+    try{ await store.set('active-mode', mode, false); } catch(e){}
+    renderHeaderForMode();
+    updateModeTabsUI();
+    config.tasks.forEach(task => mountTaskCard(task, tasksEl));
+    renderParkingLot();
+    updateProgressNote();
+    if (MODES[mode].hasMilestone) updateMeetingCountdown();
+    updateWorkloadNote();
+    if (MODES[mode].syncEnabled){
+      await syncPullAll(mode);
+      renderParkingLot();
+    }
+  }
+
+  modeTabButtons.forEach(btn => {
+    btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+  });
+
+  async function init(){
+    await loadGlobalPrefs();
+
+    // Quietly run rollover for both routines before the first render, so
+    // parking-lot carryover works even on a day the person only opens one tab.
+    for (const m of Object.keys(MODES)){
+      await loadModeData(m);
+      await performRolloverFor(m, config);
+    }
+
+    let startMode = 'morning';
+    try{
+      const res = await store.get('active-mode', false);
+      if (res && res.value && MODES[res.value]) startMode = res.value;
+    } catch(e){}
+
+    currentMode = startMode;
+    await loadModeData(startMode);
+
+    renderHeaderForMode();
+    updateModeTabsUI();
     renderTickToggle();
     renderWakeToggle();
     acquireWakeLock();
     config.tasks.forEach(task => mountTaskCard(task, tasksEl));
     renderParkingLot();
     updateProgressNote();
-    updateMeetingCountdown();
+    if (MODES[currentMode].hasMilestone) updateMeetingCountdown();
     updateWorkloadNote();
-    setInterval(() => { updateMeetingCountdown(); updateWorkloadNote(); }, 1000);
+    setInterval(() => {
+      if (MODES[currentMode].hasMilestone) updateMeetingCountdown();
+      updateWorkloadNote();
+    }, 1000);
 
     // Local data renders immediately above so the app is usable right away;
     // the sheet's copy (the permanent record) arrives a moment later and
     // wins, so a re-render picks up anything the cache didn't have.
-    await syncPullAll();
-    renderParkingLot();
+    if (MODES[currentMode].syncEnabled){
+      await syncPullAll(currentMode);
+      renderParkingLot();
+    }
   }
 
   init();
+
 </script>
 </body>
 </html>
