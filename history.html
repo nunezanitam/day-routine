@@ -166,11 +166,23 @@
     padding: 2px 8px;
     font-size: 13px;
   }
+  .hist-tabs{ display:flex; gap:8px; margin:0 0 14px; }
+  .hist-tab{
+    font-family: var(--font-mono); font-size:12px; font-weight:700;
+    padding:6px 14px; border-radius:999px; text-decoration:none;
+    border:1px solid var(--surface-2); background: var(--surface); color: var(--mist);
+  }
+  .hist-tab.active{ background: var(--accent); border-color: var(--accent); color: var(--ink); }
 </style>
 </head>
 <body>
 <div class="page">
-  <a class="back-link" href="index.html">← Back to today</a>
+  <a class="back-link" href="index.html">← Back</a>
+  <div class="hist-tabs">
+    <a class="hist-tab" data-mode="morning" href="history.html">☀️ Morning</a>
+    <a class="hist-tab" data-mode="night" href="history.html?mode=night">🌙 Night</a>
+    <a class="hist-tab" data-mode="day" href="history.html?mode=day">🏠 Today</a>
+  </div>
   <h1>What you've gotten done</h1>
   <p class="subtitle" id="subtitle">Loading…</p>
   <div id="tallies"></div>
@@ -198,20 +210,31 @@
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  const MODE_KEYS = {
+    morning: { history: 'history', tallies: 'tallies', label: 'Morning' },
+    night:   { history: 'history-night', tallies: 'tallies-night', label: 'Night' },
+    day:     { history: 'history-day', tallies: 'tallies-day', label: 'Today' },
+  };
+  const urlMode = new URLSearchParams(location.search).get('mode');
+  const mode = MODE_KEYS[urlMode] ? urlMode : 'morning';
+  const keys = MODE_KEYS[mode];
+
   async function init(){
+    document.querySelectorAll('.hist-tab').forEach(a => a.classList.toggle('active', a.dataset.mode === mode));
+    document.querySelector('.back-link').href = 'index.html';
     const subtitle = document.getElementById('subtitle');
     const talliesEl = document.getElementById('tallies');
     const logEl = document.getElementById('log');
 
     let history = [];
     try{
-      const res = await store.get('history', false);
+      const res = await store.get(keys.history, false);
       if (res && res.value) history = JSON.parse(res.value);
     } catch(e){ history = []; }
 
     let tallies = {};
     try{
-      const res = await store.get('tallies', false);
+      const res = await store.get(keys.tallies, false);
       if (res && res.value) tallies = JSON.parse(res.value);
     } catch(e){ tallies = {}; }
 

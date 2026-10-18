@@ -687,6 +687,47 @@
   @media (prefers-reduced-motion: reduce){
     .ring-fg, .node, .card, .btn{ transition: none; }
   }
+
+  /* ---------- Today tab: send-to row, drop zones, close-out ---------- */
+  .send-row{
+    display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+    margin-top:10px;
+  }
+  .send-row .send-label{
+    font-family: var(--font-mono); font-size:10px; letter-spacing:0.04em;
+    text-transform:uppercase; color: var(--mist);
+  }
+  .send-btn{
+    font-family: var(--font-mono); font-size:11px;
+    border:1px solid var(--surface-2); background: var(--surface);
+    color: var(--mist); border-radius:999px; padding:4px 10px; cursor:pointer;
+  }
+  .send-btn:hover{ border-color: var(--accent); color: var(--accent); }
+
+  .drop-zones{
+    position: fixed; left:0; right:0; bottom:16px;
+    display:none; justify-content:center; gap:10px; flex-wrap:wrap;
+    z-index: 50; pointer-events:none; padding: 0 12px;
+  }
+  body.is-dragging.can-send .drop-zones{ display:flex; }
+  .drop-zone{
+    pointer-events:auto;
+    font-family: var(--font-mono); font-size:12px; font-weight:700;
+    padding:14px 18px; border-radius:14px;
+    border:2px dashed var(--accent); background: var(--surface); color: var(--paper);
+  }
+  .drop-zone.hot{ background: var(--accent); color: var(--ink); border-style:solid; }
+
+  .history-link[hidden]{ display:none; }
+  .add-task{ flex-wrap: wrap; }
+  .add-task input[type="text"]{ min-width: 0; flex-basis: 140px; }
+  .add-task .btn.park{ background: var(--sage); }
+  .add-task .btn.park:hover{ background: var(--running); }
+  .parking-item .p-send{ background: var(--surface-2); color: var(--paper); }
+  .parking-item .p-send:hover{ color: var(--accent); }
+  .parking-empty{
+    font-family: var(--font-body); font-size:13px; color: var(--mist); margin:0;
+  }
 </style>
 </head>
 <body>
@@ -695,9 +736,10 @@
     <div class="mode-tabs" id="modeTabs">
       <button class="mode-tab" data-mode="morning" type="button">☀️ Morning</button>
       <button class="mode-tab" data-mode="night" type="button">🌙 Night</button>
+      <button class="mode-tab" data-mode="day" type="button">🏠 Today</button>
     </div>
     <p class="eyebrow" id="eyebrow">Morning routine · resets each day</p>
-    <h1><span id="titleMorning">Runway to <span id="meetingTimeLabel">2:30 PM</span></span><span id="titleNight" hidden>Night Routine</span></h1>
+    <h1><span id="titleMorning">Runway to <span id="meetingTimeLabel">2:30 PM</span></span><span id="titleNight" hidden>Night Routine</span><span id="titleDay" hidden>Today's batch</span></h1>
     <div class="meeting-row" id="meetingRow">
       <p class="meeting-countdown"><span id="milestoneName">Meeting</span> in <span id="meetingMins">—</span></p>
       <div class="meeting-time-edit">
@@ -732,22 +774,25 @@
     <input type="text" id="newTaskName" placeholder="Add a task…">
     <input type="number" id="newTaskMinutes" min="1" value="5">
     <button class="btn" id="addTaskBtn">Add</button>
+    <button class="btn park" id="parkNewTaskBtn" type="button" hidden title="Save for another day instead">Park</button>
   </div>
 
   <div class="parking-lot" id="parkingLot" hidden>
-    <p class="parking-lot-title">Parking lot — carried over, not on today's list</p>
+    <p class="parking-lot-title" id="parkingTitle">Parking lot — carried over, not on today's list</p>
     <div class="parking-items" id="parkingItems"></div>
   </div>
 
-  <p class="hint">Tap the circle, ring, or task name to check it off — timer or no timer.<br>Hold the strip on the right and drag to reorder, or nudge with ▲▼. ✕ removes a task for good.</p>
+  <p class="hint" id="hintText">Tap the circle, ring, or task name to check it off — timer or no timer.<br>Hold the strip on the right and drag to reorder, or nudge with ▲▼. ✕ removes a task for good.</p>
   <a class="history-link" id="historyLink" href="history.html">See what you've gotten done →</a>
 
   <div class="finish">
     <div class="node">✓</div>
     <p id="finishTextMorning"><strong id="meetingTimeLabel2">2:30 PM</strong> — <span id="milestoneName2">Meeting</span></p>
     <p id="finishTextNight" hidden>All done — lights out.</p>
+    <p id="finishTextDay" hidden>That's the batch. Anything left parks itself at the day reset.</p>
   </div>
 </div>
+<div class="drop-zones" id="dropZones"></div>
 <script>
   /* Claude artifacts provide window.storage; anywhere else, fall back to
      localStorage so the file works as a self-hosted page too. */
@@ -805,6 +850,8 @@
       hasMilestone: true,
       eyebrow: 'Morning routine · resets each day',
       syncEnabled: true,
+      emoji: '☀️',
+      shortLabel: 'AM',
     },
     night: {
       label: 'Night',
@@ -816,6 +863,25 @@
       hasMilestone: false,
       eyebrow: 'Night routine · resets each day',
       syncEnabled: true,
+      emoji: '🌙',
+      shortLabel: 'PM',
+    },
+    // Today: a finite batch of everyday chores/errands. No milestone, no
+    // recurring tasks, local-only. Unfinished tasks drop into this tab's
+    // parking lot at close-out (or at the day reset) instead of nagging.
+    day: {
+      label: 'Today',
+      configKey: 'config-v2-day',
+      completionsPrefix: 'completions-day-',
+      historyKey: 'history-day',
+      talliesKey: 'tallies-day',
+      defaultTasks: [],
+      hasMilestone: false,
+      eyebrow: "Today's batch · finite, close it out",
+      syncEnabled: false,
+      isDay: true,
+      emoji: '🏠',
+      shortLabel: 'Today',
     },
   };
 
@@ -834,6 +900,12 @@
   const eyebrowEl = document.getElementById('eyebrow');
   const titleMorning = document.getElementById('titleMorning');
   const titleNight = document.getElementById('titleNight');
+  const titleDay = document.getElementById('titleDay');
+  const finishTextDay = document.getElementById('finishTextDay');
+  const parkNewTaskBtn = document.getElementById('parkNewTaskBtn');
+  const parkingTitle = document.getElementById('parkingTitle');
+  const hintText = document.getElementById('hintText');
+  const dropZonesEl = document.getElementById('dropZones');
   const meetingRow = document.getElementById('meetingRow');
   const finishTextMorning = document.getElementById('finishTextMorning');
   const finishTextNight = document.getElementById('finishTextNight');
@@ -1133,19 +1205,102 @@
 
   function renderParkingLot(){
     const items = config.parkingLot || [];
+    const isDay = !!MODES[currentMode].isDay;
     parkingItemsEl.innerHTML = '';
-    parkingLotSection.hidden = items.length === 0;
+    parkingLotSection.hidden = items.length === 0 && !isDay;
+    if (isDay){
+      const total = items.reduce((sum, t) => sum + (Number(t.minutes) || 0), 0);
+      parkingTitle.textContent = 'Parking lot — saved for another day' +
+        (items.length ? ' · ' + formatDuration(total * 60) + ' parked' : '');
+      if (!items.length){
+        const empty = document.createElement('p');
+        empty.className = 'parking-empty';
+        empty.textContent = 'Nothing parked. Use "Park" to save a task for later without it counting against today.';
+        parkingItemsEl.appendChild(empty);
+      }
+    } else {
+      parkingTitle.textContent = "Parking lot — carried over, not on today's list";
+    }
     for (const item of items){
       const row = document.createElement('div');
       row.className = 'parking-item';
+      const sendBtns = isDay
+        ? ['morning', 'night'].map(m =>
+            `<button class="p-send" data-id="${item.id}" data-target="${m}" type="button" title="Add to ${MODES[m].shortLabel} routine">${MODES[m].emoji}</button>`).join('')
+        : '';
       row.innerHTML = `
         <span class="p-name">${escapeHtml(item.name)}</span>
         <span class="p-mins">${item.minutes} min</span>
         <button class="p-add" data-id="${item.id}" type="button">Add to today</button>
+        ${sendBtns}
         <button class="p-dismiss" data-id="${item.id}" type="button" aria-label="Dismiss">✕</button>
       `;
       parkingItemsEl.appendChild(row);
     }
+  }
+
+  /* ---------- moving tasks between lists ---------- */
+  let flashTimer = null;
+  function flash(msg){
+    progressNote.textContent = msg;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(updateProgressNote, 3000);
+  }
+
+  // Appends a fresh one-off copy of a task to another mode's saved list.
+  async function addTaskToMode(targetMode, item){
+    const def = MODES[targetMode];
+    let cfg = defaultConfigFor(targetMode);
+    try{
+      const res = await store.get(def.configKey, false);
+      if (res && res.value) cfg = Object.assign(cfg, JSON.parse(res.value));
+    } catch(e){}
+    const t = {
+      id: 'task-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      name: item.name, minutes: item.minutes, oneOff: true,
+    };
+    if (item.note) t.note = item.note;
+    cfg.tasks.push(t);
+    try{ await store.set(def.configKey, JSON.stringify(cfg), false); } catch(e){}
+  }
+
+  // Sends an open one-off task from the current list to another mode or the parking lot.
+  async function sendTask(taskId, target){
+    const task = config.tasks.find(t => t.id === taskId);
+    if (!task || !task.oneOff) return;
+    if (completions[task.id]){ flash('Already done — uncheck it first to move it.'); return; }
+    const el = tasksEl.querySelector('[data-task-id="' + CSS.escape(task.id) + '"]');
+    if (el && el._stop) el._stop();
+    config.tasks = config.tasks.filter(t => t.id !== task.id);
+    delete completions[task.id];
+    if (target === 'parking'){
+      config.parkingLot = config.parkingLot || [];
+      const parked = { id: task.id, name: task.name, minutes: task.minutes };
+      if (task.note) parked.note = task.note;
+      config.parkingLot.push(parked);
+      syncParking(currentMode);
+    } else {
+      await addTaskToMode(target, task);
+    }
+    await saveConfig();
+    await saveCompletions();
+    if (el) el.remove();
+    renderParkingLot();
+    updateProgressNote();
+    updateWorkloadNote();
+    flash(target === 'parking' ? 'Parked for another day.' : 'Moved to ' + MODES[target].label + '.');
+  }
+
+  async function sendParked(id, target){
+    const idx = (config.parkingLot || []).findIndex(t => t.id === id);
+    if (idx === -1) return;
+    const item = config.parkingLot[idx];
+    config.parkingLot.splice(idx, 1);
+    await addTaskToMode(target, item);
+    await saveConfig();
+    syncParking(currentMode);
+    renderParkingLot();
+    flash('Moved to ' + MODES[target].label + '.');
   }
 
   async function addFromParkingLot(id){
@@ -1174,11 +1329,22 @@
   parkingItemsEl.addEventListener('click', (ev) => {
     const addBtn = ev.target.closest('.p-add');
     const dismissBtn = ev.target.closest('.p-dismiss');
+    const sendBtn = ev.target.closest('.p-send');
     if (addBtn) addFromParkingLot(addBtn.dataset.id);
+    else if (sendBtn) sendParked(sendBtn.dataset.id, sendBtn.dataset.target);
     else if (dismissBtn) dismissFromParkingLot(dismissBtn.dataset.id);
   });
 
   function updateProgressNote(){
+    if (MODES[currentMode].isDay){
+      const today = logicalDayKey();
+      const doneToday = historyLog.filter(h => h.dateKey === today).length;
+      const toGo = config.tasks.length;
+      progressNote.textContent = (doneToday || toGo)
+        ? doneToday + ' done today · ' + toGo + ' to go'
+        : 'Nothing on the list yet — add something below.';
+      return;
+    }
     const total = config.tasks.length;
     const done = config.tasks.filter(t => completions[t.id]).length;
     progressNote.textContent = total === 0
@@ -1243,6 +1409,9 @@
   function onDragMove(e){
     if (!dragEl) return;
     e.preventDefault();
+    dropZonesEl.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('hot'));
+    const overZone = zoneAt(e.clientX, e.clientY);
+    if (overZone){ overZone.classList.add('hot'); return; }
     const after = elementAfterY(e.clientY);
     if (after){
       if (after !== dragEl.nextElementSibling) tasksEl.insertBefore(dragEl, after);
@@ -1251,15 +1420,41 @@
     }
   }
 
-  async function onDragEnd(){
+  function zoneAt(x, y){
+    if (typeof x !== 'number') return null;
+    const hit = document.elementFromPoint(x, y);
+    return hit ? hit.closest('.drop-zone') : null;
+  }
+
+  function showDropZones(el){
+    const task = config.tasks.find(t => t.id === el.dataset.taskId);
+    if (!task || !task.oneOff || completions[task.id]) return;
+    const targets = Object.keys(MODES).filter(m => m !== currentMode)
+      .map(m => ({ key: m, label: MODES[m].emoji + ' ' + MODES[m].shortLabel }));
+    targets.push({ key: 'parking', label: '🅿️ Parking' });
+    dropZonesEl.innerHTML = targets.map(t =>
+      '<div class="drop-zone" data-target="' + t.key + '">' + t.label + '</div>').join('');
+    document.body.classList.add('can-send');
+  }
+
+  function hideDropZones(){
+    document.body.classList.remove('can-send');
+    dropZonesEl.innerHTML = '';
+  }
+
+  async function onDragEnd(e){
     if (!dragEl) return;
-    dragEl.classList.remove('dragging');
+    const el = dragEl;
+    const zone = (e && e.type === 'pointerup') ? zoneAt(e.clientX, e.clientY) : null;
+    el.classList.remove('dragging');
     document.body.classList.remove('is-dragging');
     dragEl = null;
     document.removeEventListener('pointermove', onDragMove);
     document.removeEventListener('pointerup', onDragEnd);
     document.removeEventListener('pointercancel', onDragEnd);
-    await persistOrder();
+    hideDropZones();
+    if (zone) await sendTask(el.dataset.taskId, zone.dataset.target);
+    else await persistOrder();
   }
 
   function attachDrag(handle, el){
@@ -1269,6 +1464,7 @@
       dragEl = el;
       el.classList.add('dragging');
       document.body.classList.add('is-dragging');
+      showDropZones(el);
       document.addEventListener('pointermove', onDragMove, { passive: false });
       document.addEventListener('pointerup', onDragEnd);
       document.addEventListener('pointercancel', onDragEnd);
@@ -1314,9 +1510,17 @@
             '<button class="btn reset">Reset</button>' +
           '</div>' +
         '</div>' +
+        (task.oneOff ? '<div class="send-row"><span class="send-label">Send to</span>' +
+          Object.keys(MODES).filter(m => m !== currentMode).map(m =>
+            '<button class="send-btn" data-target="' + m + '" type="button">' + MODES[m].emoji + ' ' + MODES[m].shortLabel + '</button>').join('') +
+          '</div>' : '') +
         '<button class="grip" title="Hold and drag to reorder"><span>⠿</span></button>' +
       '</div>';
     container.appendChild(el);
+    el.querySelectorAll('.send-btn').forEach(b => b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      sendTask(task.id, b.dataset.target);
+    }));
 
     const nodeEl = el.querySelector('.node');
     const titleEl = el.querySelector('h3');
@@ -1350,6 +1554,7 @@
       lastTickSecond = null;
     }
 
+    let leaveTimer = null;
     function markDone(fromTimer){
       stopTimer();
       remaining = 0;
@@ -1367,9 +1572,22 @@
       updateProgressNote();
       updateWorkloadNote();
       if (fromTimer) chime();
+      // On Today, finished tasks step out of the active list (they live on in the log).
+      if (MODES[currentMode].isDay){
+        leaveTimer = setTimeout(async () => {
+          config.tasks = config.tasks.filter(t => t.id !== task.id);
+          delete completions[task.id];
+          await saveConfig();
+          await saveCompletions();
+          el.remove();
+          updateProgressNote();
+          updateWorkloadNote();
+        }, 900);
+      }
     }
 
     function markUndone(){
+      clearTimeout(leaveTimer);
       stopTimer();
       remaining = duration;
       isDone = false;
@@ -1504,6 +1722,8 @@
       if (next) { tasksEl.insertBefore(next, el); persistOrder(); }
     });
 
+    el._stop = stopTimer;
+
     controllers.push({
       sync,
       getRemaining: () => isDone ? 0 : remaining,
@@ -1555,7 +1775,11 @@
   }
 
   function updateWorkloadNote(){
-    if (!controllers.length){ workloadNote.textContent = ''; return; }
+    if (!controllers.length){
+      workloadNote.textContent = '';
+      workloadNote.className = 'workload-note';
+      return;
+    }
     const workSeconds = controllers.reduce((sum, c) => sum + c.getRemaining(), 0);
     if (workSeconds <= 0){
       workloadNote.textContent = 'All tasks done.';
@@ -1563,6 +1787,12 @@
       return;
     }
     const workLabel = formatDuration(workSeconds);
+    if (MODES[currentMode].isDay){
+      const totalSeconds = config.tasks.reduce((sum, t) => sum + (Number(t.minutes) || 0) * 60, 0);
+      workloadNote.textContent = workLabel + ' left of ' + formatDuration(totalSeconds) + ' planned';
+      workloadNote.className = 'workload-note';
+      return;
+    }
     if (!MODES[currentMode].hasMilestone || lastMilestoneDiffMs === null){
       workloadNote.textContent = workLabel + ' of tasks left';
       workloadNote.className = 'workload-note';
@@ -1624,6 +1854,24 @@
   }
 
   document.getElementById('addTaskBtn').addEventListener('click', addTask);
+
+  async function parkNewTask(){
+    const nameInput = document.getElementById('newTaskName');
+    const minInput = document.getElementById('newTaskMinutes');
+    const name = nameInput.value.trim();
+    const minutes = Math.max(1, parseInt(minInput.value, 10) || 5);
+    if (!name) return;
+    config.parkingLot = config.parkingLot || [];
+    config.parkingLot.push({ id: 'task-' + Date.now(), name, minutes });
+    await saveConfig();
+    syncParking(currentMode);
+    renderParkingLot();
+    nameInput.value = '';
+    minInput.value = 5;
+    nameInput.focus();
+  }
+  parkNewTaskBtn.addEventListener('click', parkNewTask);
+
   document.getElementById('newTaskName').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') addTask();
   });
@@ -1704,15 +1952,22 @@
   function renderHeaderForMode(){
     const def = MODES[currentMode];
     eyebrowEl.textContent = def.eyebrow;
+    const isDay = !!def.isDay;
     titleMorning.hidden = !def.hasMilestone;
-    titleNight.hidden = def.hasMilestone;
+    titleNight.hidden = def.hasMilestone || isDay;
+    titleDay.hidden = !isDay;
     meetingRow.hidden = !def.hasMilestone;
     finishTextMorning.hidden = !def.hasMilestone;
-    finishTextNight.hidden = def.hasMilestone;
+    finishTextNight.hidden = def.hasMilestone || isDay;
+    finishTextDay.hidden = !isDay;
+    parkNewTaskBtn.hidden = !isDay;
+    hintText.innerHTML = isDay
+      ? 'Tap the circle or task name to check it off. Hold the strip on the right and drag to reorder, or drag onto ☀️ / 🌙 / 🅿️ to send it elsewhere. Checked-off tasks move into your log; anything left parks itself at the day reset.'
+      : 'Tap the circle, ring, or task name to check it off — timer or no timer.<br>Hold the strip on the right and drag to reorder, or nudge with ▲▼. ✕ removes a task for good.';
     dayResetInput.value = prefs.dayResetTime || DEFAULT_DAY_RESET_TIME;
     milestoneInput.value = config.milestone || DEFAULT_MILESTONE;
     meetingTimeInput.value = config.meetingTime || DEFAULT_MEETING_TIME;
-    historyLink.href = 'history.html' + (currentMode === 'night' ? '?mode=night' : '');
+    historyLink.href = 'history.html' + (currentMode === 'morning' ? '' : '?mode=' + currentMode);
   }
 
   async function switchMode(mode){
